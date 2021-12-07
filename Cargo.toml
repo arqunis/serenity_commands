@@ -1,0 +1,8 @@
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[workspace]
+members = [
+    "serenity_commands",
+    "serenity_commands_derive",
+    "examples/e01_basic_ping_bot",
+]
