@@ -9,7 +9,9 @@ use parse::*;
 pub fn derive_commands(item: TokenStream) -> Result<TokenStream> {
     let input = parse2::<DeriveInput>(item)?;
 
-    let Commands { commands } = parse_commands(&input)?;
+    let Commands {
+        commands,
+    } = parse_commands(&input)?;
 
     let name = input.ident;
 

@@ -65,7 +65,7 @@ pub fn derive_command(item: TokenStream) -> Result<TokenStream> {
                         unreachable!()
                     }
                 });
-            }
+            },
             CommandData::Options(options) => {
                 let mut option_fn_names = Vec::new();
 
@@ -79,9 +79,8 @@ pub fn derive_command(item: TokenStream) -> Result<TokenStream> {
 
                 let option_kinds = options.iter().map(|o| o.kind);
 
-                let option_data_extractions = options
-                    .iter()
-                    .map(|o| o.kind.to_data_option_value_extraction());
+                let option_data_extractions =
+                    options.iter().map(|o| o.kind.to_data_option_value_extraction());
 
                 extra.extend(quote! {
                     fn register_command(
@@ -153,7 +152,7 @@ pub fn derive_command(item: TokenStream) -> Result<TokenStream> {
                         Self::parse(option.options)
                     }
                 });
-            }
+            },
         }
 
         extra

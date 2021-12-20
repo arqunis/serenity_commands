@@ -1,9 +1,8 @@
-use serenity_commands::serenity;
-use serenity_commands::macros::{Command, Commands};
-
 use serenity::client::{Client, Context, EventHandler};
 use serenity::model::interactions::*;
 use serenity::model::prelude::*;
+use serenity_commands::macros::{Command, Commands};
+use serenity_commands::serenity;
 
 /// Play a little game called Ping Pong!
 #[derive(Debug, Command)]
@@ -39,7 +38,9 @@ impl EventHandler for Handler {
         };
 
         match command {
-            Command::Ping(Ping { n }) => {
+            Command::Ping(Ping {
+                n,
+            }) => {
                 interaction
                     .create_interaction_response(&ctx, |r| {
                         r.kind(InteractionResponseType::ChannelMessageWithSource)
@@ -58,10 +59,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let application_id = std::env::var("APPLICATION_ID")?;
     let application_id = application_id.parse::<u64>()?;
 
-    let mut client = Client::builder(&token)
-        .event_handler(Handler)
-        .application_id(application_id)
-        .await?;
+    let mut client =
+        Client::builder(&token).event_handler(Handler).application_id(application_id).await?;
 
     client.start_autosharded().await?;
 

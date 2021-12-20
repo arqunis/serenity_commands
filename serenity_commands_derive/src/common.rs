@@ -10,7 +10,10 @@ pub struct AttrOption<T> {
 
 impl<T> AttrOption<T> {
     pub fn new(name: &'static str) -> Self {
-        Self { name, value: None }
+        Self {
+            name,
+            value: None,
+        }
     }
 
     pub fn set(&mut self, span: Span, value: T) -> Result<()> {

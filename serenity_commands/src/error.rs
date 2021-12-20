@@ -1,7 +1,7 @@
-use serenity::model::interactions::application_command::ApplicationCommandOptionType;
-
 use std::error::Error as StdError;
 use std::fmt;
+
+use serenity::model::interactions::application_command::ApplicationCommandOptionType;
 
 #[derive(Debug, Clone)]
 pub enum ParseError {

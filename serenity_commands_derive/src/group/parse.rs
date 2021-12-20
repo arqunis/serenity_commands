@@ -41,7 +41,7 @@ pub fn parse_group(input: &DeriveInput) -> Result<Group> {
             match meta {
                 NestedMeta::Meta(Meta::NameValue(nv)) if nv.path.is_ident("name") => {
                     name.set(nv.span(), get_lit_string(&nv.lit)?)?;
-                }
+                },
                 _ => return Err(Error::new(meta.span(), "unknown option or invalid syntax")),
             };
         }
@@ -56,7 +56,7 @@ pub fn parse_group(input: &DeriveInput) -> Result<Group> {
         Some(name) => name,
         None => {
             return Err(Error::new(input.ident.span(), "expected a name"));
-        }
+        },
     };
 
     let description = match description {
@@ -66,7 +66,7 @@ pub fn parse_group(input: &DeriveInput) -> Result<Group> {
                 input.ident.span(),
                 "expected a description in a documentation string",
             ));
-        }
+        },
     };
 
     Ok(Group {

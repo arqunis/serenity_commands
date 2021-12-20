@@ -48,7 +48,7 @@ impl Command {
                 match meta {
                     NestedMeta::Meta(Meta::NameValue(nv)) if nv.path.is_ident("name") => {
                         name.set(nv.span(), get_lit_string(&nv.lit)?)?;
-                    }
+                    },
                     _ => return Err(Error::new(meta.span(), "unknown option or invalid syntax")),
                 };
             }
@@ -57,11 +57,8 @@ impl Command {
         let name = match name.value() {
             Some(name) => name,
             None => {
-                return Err(Error::new(
-                    input.ident.span(),
-                    "expected a name",
-                ));
-            }
+                return Err(Error::new(input.ident.span(), "expected a name"));
+            },
         };
 
         let description = match description {
@@ -71,7 +68,7 @@ impl Command {
                     input.ident.span(),
                     "expected a description in documentation string",
                 ));
-            }
+            },
         };
 
         let data = match &input.data {
@@ -82,7 +79,7 @@ impl Command {
                     input.span(),
                     "expected either a struct with named fields or an enum",
                 ))
-            }
+            },
         };
 
         Ok(Command {
@@ -103,13 +100,13 @@ fn parse_struct(data: &DataStruct) -> Result<CommandData> {
             }
 
             Ok(CommandData::Options(options))
-        }
+        },
         _ => {
             return Err(Error::new(
                 data.fields.span(),
                 "expected a struct with named fields or a unit struct",
             ));
-        }
+        },
     }
 }
 
@@ -185,12 +182,7 @@ impl CommandOption {
     fn new(f: &Field) -> Result<Self> {
         let ident = match &f.ident {
             Some(i) => i.clone(),
-            None => {
-                return Err(Error::new(
-                    f.span(),
-                    "expected a name field (i.e. `name: type`)",
-                ))
-            }
+            None => return Err(Error::new(f.span(), "expected a name field (i.e. `name: type`)")),
         };
 
         let mut name = AttrOption::new("name");
@@ -225,20 +217,20 @@ impl CommandOption {
                 match &meta {
                     NestedMeta::Lit(_) => {
                         return Err(Error::new(meta.span(), "unexpected literal"));
-                    }
+                    },
                     NestedMeta::Meta(m) => match m {
                         // `name = "..."` option
                         Meta::NameValue(nv) if nv.path.is_ident("name") => {
                             name.set(nv.span(), get_lit_string(&nv.lit)?)?;
-                        }
+                        },
 
                         // `required` or `required = true | false` option
                         Meta::Path(p) if p.is_ident("required") => {
                             required.set(p.span(), true)?;
-                        }
+                        },
                         Meta::NameValue(nv) if nv.path.is_ident("required") => {
                             required.set(nv.span(), get_lit_boolean(&nv.lit)?)?;
-                        }
+                        },
 
                         // `boolean` | `string` | `integer` | `number` | `mention` | `user` | `channel` | `role` option
                         Meta::Path(p) => {
@@ -250,10 +242,10 @@ impl CommandOption {
                             }
 
                             kind = CommandOptionKind::new(&get_path_as_string(p)?);
-                        }
+                        },
                         _ => {
                             return Err(Error::new(meta.span(), "unknown option or invalid syntax"))
-                        }
+                        },
                     },
                 };
             }
@@ -269,7 +261,7 @@ impl CommandOption {
                     f.span(),
                     "expected a documentation string for the description",
                 ))
-            }
+            },
         };
 
         let kind = match kind {
@@ -279,7 +271,7 @@ impl CommandOption {
                     f.span(),
                     "expected a type for the option (e.g. `string`, `integer`, `number`, ...)",
                 ))
-            }
+            },
         };
 
         Ok(Self {
@@ -359,15 +351,15 @@ impl SubCommand {
                 match &meta {
                     NestedMeta::Lit(_) => {
                         return Err(Error::new(meta.span(), "unexpected literal"));
-                    }
+                    },
                     NestedMeta::Meta(m) => match m {
                         // `required` or `required = true | false` option
                         Meta::Path(p) if p.is_ident("required") => {
                             required.set(p.span(), true)?;
-                        }
+                        },
                         Meta::NameValue(nv) if nv.path.is_ident("required") => {
                             required.set(nv.span(), get_lit_boolean(&nv.lit)?)?;
-                        }
+                        },
 
                         // `subcommand` | `group` option
                         Meta::Path(p) => {
@@ -379,10 +371,10 @@ impl SubCommand {
                             }
 
                             kind = SubCommandKind::new(&get_path_as_string(p)?);
-                        }
+                        },
                         _ => {
                             return Err(Error::new(meta.span(), "unknown option or invalid syntax"))
-                        }
+                        },
                     },
                 };
             }
@@ -397,7 +389,7 @@ impl SubCommand {
                     var.span(),
                     "expected a type for the option (either `subcommand` or `group`)",
                 ));
-            }
+            },
         };
 
         Ok(Self {
