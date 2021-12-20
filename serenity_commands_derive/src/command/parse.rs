@@ -1,19 +1,130 @@
-use proc_macro2::{Span, TokenStream};
+use proc_macro2::TokenStream;
 use quote::{quote, ToTokens};
 use syn::spanned::Spanned;
 use syn::*;
 
-use crate::common::{parse_boolean, parse_ident_as_string, parse_string};
+use crate::common::{get_lit_boolean, get_lit_string, get_path_as_string, parse_doc, AttrOption};
 
 pub struct Command {
     pub name: String,
     pub description: String,
-    pub options: Vec<CommandOption>,
-    pub is_subcommand_container: bool,
+    pub data: CommandData,
+}
+
+pub enum CommandData {
+    Options(Vec<CommandOption>),
+    SubCommands(Vec<SubCommand>),
+}
+
+impl Command {
+    pub fn new(input: &DeriveInput) -> Result<Command> {
+        let mut name = AttrOption::new("name");
+
+        let mut description = None;
+
+        for attr in &input.attrs {
+            if attr.path.is_ident("doc") {
+                if description.is_some() {
+                    return Err(Error::new(
+                        attr.span(),
+                        "documentation string has already been provided",
+                    ));
+                }
+
+                description = Some(parse_doc(attr)?);
+                continue;
+            }
+
+            if !attr.path.is_ident("command") {
+                continue;
+            }
+
+            let list = match attr.parse_meta()? {
+                Meta::List(l) => l,
+                _ => return Err(Error::new(attr.span(), "expected a list")),
+            };
+
+            for meta in list.nested {
+                match meta {
+                    NestedMeta::Meta(Meta::NameValue(nv)) if nv.path.is_ident("name") => {
+                        name.set(nv.span(), get_lit_string(&nv.lit)?)?;
+                    }
+                    _ => return Err(Error::new(meta.span(), "unknown option or invalid syntax")),
+                };
+            }
+        }
+
+        let name = match name.value() {
+            Some(name) => name,
+            None => {
+                return Err(Error::new(
+                    input.ident.span(),
+                    "expected a name",
+                ));
+            }
+        };
+
+        let description = match description {
+            Some(desc) => desc,
+            None => {
+                return Err(Error::new(
+                    input.ident.span(),
+                    "expected a description in documentation string",
+                ));
+            }
+        };
+
+        let data = match &input.data {
+            Data::Struct(s) => parse_struct(s)?,
+            Data::Enum(e) => parse_enum(e)?,
+            _ => {
+                return Err(Error::new(
+                    input.span(),
+                    "expected either a struct with named fields or an enum",
+                ))
+            }
+        };
+
+        Ok(Command {
+            name,
+            description,
+            data,
+        })
+    }
+}
+
+fn parse_struct(data: &DataStruct) -> Result<CommandData> {
+    match &data.fields {
+        Fields::Unit => Ok(CommandData::Options(Vec::new())),
+        Fields::Named(n) => {
+            let mut options = Vec::new();
+            for field in &n.named {
+                options.push(CommandOption::new(field)?);
+            }
+
+            Ok(CommandData::Options(options))
+        }
+        _ => {
+            return Err(Error::new(
+                data.fields.span(),
+                "expected a struct with named fields or a unit struct",
+            ));
+        }
+    }
+}
+
+fn parse_enum(data: &DataEnum) -> Result<CommandData> {
+    let mut subcommands = Vec::new();
+
+    for variant in &data.variants {
+        subcommands.push(SubCommand::new(variant)?);
+    }
+
+    Ok(CommandData::SubCommands(subcommands))
 }
 
 #[derive(Clone, Copy)]
-pub enum OptionKind {
+pub enum CommandOptionKind {
     Boolean,
     String,
     Integer,
@@ -22,12 +133,10 @@ pub enum OptionKind {
     User,
     Channel,
     Role,
-    SubCommand,
-    SubCommandGroup,
 }
 
-impl OptionKind {
-    fn new_command(s: &str) -> Option<Self> {
+impl CommandOptionKind {
+    fn new(s: &str) -> Option<Self> {
         Some(match s {
             "boolean" => Self::Boolean,
             "string" => Self::String,
@@ -41,340 +150,260 @@ impl OptionKind {
         })
     }
 
-    fn new_subcommand(s: &str) -> Option<Self> {
-        Some(match s {
-            "subcommand" => Self::SubCommand,
-            "group" => Self::SubCommandGroup,
-            _ => return None,
-        })
-    }
-
-    pub fn to_subcommand_registration_fn(self) -> TokenStream {
-        match self {
-            Self::SubCommand => quote!(register_subcommand),
-            Self::SubCommandGroup => quote!(register_subcommand_group),
-            _ => unreachable!(),
-        }
-    }
-
-    pub fn to_subcommand_parsing_fn(self) -> TokenStream {
-        match self {
-            Self::SubCommand => quote!(parse_subcommand),
-            Self::SubCommandGroup => quote!(parse_subcommand_group),
-            _ => unreachable!(),
-        }
-    }
-
     pub fn to_data_option_value_extraction(self) -> TokenStream {
         match self {
             Self::User => quote!(User(v, _)),
-            Self::SubCommand | Self::SubCommandGroup => unreachable!(),
             _ => quote!(#self(v)),
         }
     }
 }
 
-impl ToTokens for OptionKind {
+impl ToTokens for CommandOptionKind {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         tokens.extend(match self {
-            OptionKind::Boolean => quote!(Boolean),
-            OptionKind::String => quote!(String),
-            OptionKind::Integer => quote!(Integer),
-            OptionKind::Number => quote!(Number),
-            OptionKind::Mention => quote!(Mention),
-            OptionKind::User => quote!(User),
-            OptionKind::Channel => quote!(Channel),
-            OptionKind::Role => quote!(Role),
-            OptionKind::SubCommand => quote!(SubCommand),
-            OptionKind::SubCommandGroup => quote!(SubCommandGroup),
+            Self::Boolean => quote!(Boolean),
+            Self::String => quote!(String),
+            Self::Integer => quote!(Integer),
+            Self::Number => quote!(Number),
+            Self::Mention => quote!(Mention),
+            Self::User => quote!(User),
+            Self::Channel => quote!(Channel),
+            Self::Role => quote!(Role),
         });
     }
 }
 
 pub struct CommandOption {
     pub ident: Ident,
-    pub name: Option<String>,
-    pub description: Option<String>,
-    pub kind: OptionKind,
+    pub name: String,
+    pub description: String,
+    pub kind: CommandOptionKind,
     pub required: bool,
 }
 
-pub fn parse_command(input: &DeriveInput) -> Result<Command> {
-    let mut name = None;
-    let mut description = None;
+impl CommandOption {
+    fn new(f: &Field) -> Result<Self> {
+        let ident = match &f.ident {
+            Some(i) => i.clone(),
+            None => {
+                return Err(Error::new(
+                    f.span(),
+                    "expected a name field (i.e. `name: type`)",
+                ))
+            }
+        };
 
-    for attr in &input.attrs {
-        if attr.path.is_ident("doc") {
-            if description.is_some() {
-                return Err(Error::new(attr.span(), "documentation string has already been provided"));
+        let mut name = AttrOption::new("name");
+        let mut required = AttrOption::new("required");
+
+        let mut description = None;
+        let mut kind = None;
+
+        for attr in &f.attrs {
+            if attr.path.is_ident("doc") {
+                if description.is_some() {
+                    return Err(Error::new(
+                        attr.span(),
+                        "documentation string has already been provided",
+                    ));
+                }
+
+                description = Some(parse_doc(attr)?);
+                continue;
             }
 
-            let nv = match attr.parse_meta()? {
-                Meta::NameValue(nv) => nv,
-                _ => return Err(Error::new(attr.span(), "invalid documentation string")),
-            };
+            if !attr.path.is_ident("option") {
+                continue;
+            }
 
-            description = Some(match nv.lit {
-                Lit::Str(s) => s.value().trim().to_string(),
-                _ => return Err(Error::new(nv.span(), "expected string")),
-            });
-
-            continue;
-        }
-
-        if attr.path.is_ident("command") {
             let list = match attr.parse_meta()? {
                 Meta::List(l) => l,
                 _ => return Err(Error::new(attr.span(), "expected a list")),
             };
 
             for meta in list.nested {
-                let m = match meta {
-                    NestedMeta::Meta(m @ Meta::NameValue(_)) => m,
-                    _ => {
-                        return Err(Error::new(
-                            meta.span(),
-                            "expected `<name> = <value>` parameters",
-                        ))
+                match &meta {
+                    NestedMeta::Lit(_) => {
+                        return Err(Error::new(meta.span(), "unexpected literal"));
                     }
+                    NestedMeta::Meta(m) => match m {
+                        // `name = "..."` option
+                        Meta::NameValue(nv) if nv.path.is_ident("name") => {
+                            name.set(nv.span(), get_lit_string(&nv.lit)?)?;
+                        }
+
+                        // `required` or `required = true | false` option
+                        Meta::Path(p) if p.is_ident("required") => {
+                            required.set(p.span(), true)?;
+                        }
+                        Meta::NameValue(nv) if nv.path.is_ident("required") => {
+                            required.set(nv.span(), get_lit_boolean(&nv.lit)?)?;
+                        }
+
+                        // `boolean` | `string` | `integer` | `number` | `mention` | `user` | `channel` | `role` option
+                        Meta::Path(p) => {
+                            if kind.is_some() {
+                                return Err(Error::new(
+                                    p.span(),
+                                    "option type has already been provided",
+                                ));
+                            }
+
+                            kind = CommandOptionKind::new(&get_path_as_string(p)?);
+                        }
+                        _ => {
+                            return Err(Error::new(meta.span(), "unknown option or invalid syntax"))
+                        }
+                    },
                 };
-
-                if let Some(s) = parse_string(&m, "name")? {
-                    if name.is_some() {
-                        return Err(Error::new(
-                            m.span(),
-                            "`name` parameter has already been provided",
-                        ));
-                    }
-
-                    name = Some(s);
-                    continue;
-                }
-            }
-
-            continue;
-        }
-    }
-
-    let (options, is_subcommand_container) = match &input.data {
-        Data::Struct(s) => (parse_struct(s)?, false),
-        Data::Enum(e) => (parse_enum(e)?, true),
-        _ => {
-            return Err(Error::new(
-                input.span(),
-                "expected either a struct with named fields or an enum",
-            ))
-        }
-    };
-
-    let name = name.ok_or(Error::new(
-        input.ident.span(),
-        "expected `#[command(...)]` attribute",
-    ))?;
-
-    let description = description.ok_or(Error::new(
-        input.ident.span(),
-        "expected a description in documentation string",
-    ))?;
-
-    Ok(Command {
-        name,
-        description,
-        options,
-        is_subcommand_container,
-    })
-}
-
-fn parse_struct(data: &DataStruct) -> Result<Vec<CommandOption>> {
-    let mut options = Vec::new();
-
-    match &data.fields {
-        Fields::Unit => return Ok(options),
-        Fields::Named(n) => {
-            for field in &n.named {
-                options.push(parse_command_option(
-                    field.span(),
-                    field.ident.clone().unwrap(),
-                    &field.attrs,
-                )?);
             }
         }
-        _ => {
-            return Err(Error::new(
-                data.fields.span(),
-                "expected a struct with named fields or a unit struct",
-            ))
-        }
-    };
 
-    Ok(options)
-}
+        let name = name.value().unwrap_or_else(|| ident.to_string());
+        let required = required.value().unwrap_or(false);
 
-fn parse_enum(data: &DataEnum) -> Result<Vec<CommandOption>> {
-    let mut options = Vec::new();
-
-    for variant in &data.variants {
-        options.push(parse_subcommand_option(
-            variant.span(),
-            variant.ident.clone(),
-            &variant.attrs,
-        )?);
-    }
-
-    Ok(options)
-}
-
-fn parse_command_option(span: Span, ident: Ident, attrs: &[Attribute]) -> Result<CommandOption> {
-    let mut name = None;
-    let mut description = None;
-    let mut kind = None;
-    let mut required = None;
-
-    for attr in attrs {
-        let list = match attr.parse_meta()? {
-            Meta::List(l) => l,
-            Meta::NameValue(nv) => {
-                if nv.path.is_ident("doc") {
-                    if description.is_some() {
-                        return Err(Error::new(nv.span(), "documentation string has already been provided"));
-                    }
-
-                    description = Some(match nv.lit {
-                        Lit::Str(s) => s.value().trim().to_string(),
-                        _ => return Err(Error::new(nv.span(), "expected string")),
-                    });
-
-                    continue;
-                }
-
-                return Err(Error::new(nv.span(), "expected documentation string"));
+        let description = match description {
+            Some(desc) => desc,
+            None => {
+                return Err(Error::new(
+                    f.span(),
+                    "expected a documentation string for the description",
+                ))
             }
-            Meta::Path(..) => return Err(Error::new(attr.span(), "expected a list")),
         };
 
-        for meta in list.nested {
-            match meta {
-                NestedMeta::Meta(Meta::List(_)) | NestedMeta::Lit(_) => {
-                    return Err(Error::new(
-                        meta.span(),
-                        "expected `<name>` or `<name> = <value>` parameters",
-                    ))
-                }
-                NestedMeta::Meta(m) => {
-                    if let Some(s) = parse_string(&m, "name")? {
-                        if name.is_some() {
-                            return Err(Error::new(
-                                m.span(),
-                                "`name` parameter has already been provided",
-                            ));
-                        }
-
-                        name = Some(s);
-                        continue;
-                    }
-
-                    if let Some(r) = parse_boolean(&m, "required")? {
-                        if required.is_some() {
-                            return Err(Error::new(
-                                m.span(),
-                                "`required` parameter has already been provided",
-                            ));
-                        }
-
-                        required = Some(r);
-                        continue;
-                    }
-
-                    if kind.is_some() {
-                        return Err(Error::new(
-                            m.span(),
-                            "option type parameter has already been provided",
-                        ));
-                    }
-
-                    if let Some(s) = parse_ident_as_string(&m) {
-                        kind = OptionKind::new_command(&s);
-                    }
-                }
-            };
-        }
-    }
-
-    if description.is_none() {
-        return Err(Error::new(span, "expected documentation string"));
-    }
-
-    let kind = kind.ok_or(Error::new(
-        span,
-        "expected a valid option type (e.g. `string`, `integer`)",
-    ))?;
-
-    let required = required.unwrap_or(false);
-
-    Ok(CommandOption {
-        ident,
-        name,
-        description,
-        kind,
-        required,
-    })
-}
-
-fn parse_subcommand_option(span: Span, ident: Ident, attrs: &[Attribute]) -> Result<CommandOption> {
-    let mut kind = None;
-    let mut required = None;
-
-    for attr in attrs {
-        let list = match attr.parse_meta()? {
-            Meta::List(l) => l,
-            _ => return Err(Error::new(attr.span(), "expected a list")),
+        let kind = match kind {
+            Some(kind) => kind,
+            None => {
+                return Err(Error::new(
+                    f.span(),
+                    "expected a type for the option (e.g. `string`, `integer`, `number`, ...)",
+                ))
+            }
         };
 
-        for meta in list.nested {
-            match meta {
-                NestedMeta::Meta(Meta::List(_)) | NestedMeta::Lit(_) => {
-                    return Err(Error::new(meta.span(), "expected `<name>` parameters"))
-                }
-                NestedMeta::Meta(m) => {
-                    if let Some(r) = parse_boolean(&m, "required")? {
-                        if required.is_some() {
-                            return Err(Error::new(
-                                m.span(),
-                                "`required` parameter has already been provided",
-                            ));
-                        }
+        Ok(Self {
+            ident,
+            name,
+            description,
+            kind,
+            required,
+        })
+    }
+}
 
-                        required = Some(r);
-                        continue;
-                    }
+#[derive(Clone, Copy)]
+pub enum SubCommandKind {
+    SubCommand,
+    Group,
+}
 
-                    if kind.is_some() {
-                        return Err(Error::new(
-                            m.span(),
-                            "option type parameter has already been provided",
-                        ));
-                    }
+impl SubCommandKind {
+    fn new(s: &str) -> Option<Self> {
+        Some(match s {
+            "subcommand" => Self::SubCommand,
+            "group" => Self::Group,
+            _ => return None,
+        })
+    }
 
-                    if let Some(s) = parse_ident_as_string(&m) {
-                        kind = OptionKind::new_subcommand(&s);
-                    }
-                }
-            };
+    pub fn to_registration_fn(self) -> TokenStream {
+        match self {
+            Self::SubCommand => quote!(register_subcommand),
+            Self::Group => quote!(register_subcommand_group),
         }
     }
 
-    let kind = kind.ok_or(Error::new(
-        span,
-        "expected a valid option type (`subcommand`, `group`)",
-    ))?;
+    pub fn to_parsing_fn(self) -> TokenStream {
+        match self {
+            Self::SubCommand => quote!(parse_subcommand),
+            Self::Group => quote!(parse_subcommand_group),
+        }
+    }
+}
 
-    let required = required.unwrap_or(false);
+impl ToTokens for SubCommandKind {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        tokens.extend(match self {
+            Self::SubCommand => quote!(SubCommand),
+            Self::Group => quote!(SubCommandGroup),
+        });
+    }
+}
 
-    Ok(CommandOption {
-        ident,
-        name: None,
-        description: None,
-        kind,
-        required,
-    })
+pub struct SubCommand {
+    pub ident: Ident,
+    pub kind: SubCommandKind,
+    pub required: bool,
+}
+
+impl SubCommand {
+    fn new(var: &Variant) -> Result<Self> {
+        let ident = var.ident.clone();
+
+        let mut required = AttrOption::new("required");
+
+        let mut kind = None;
+
+        for attr in &var.attrs {
+            if !attr.path.is_ident("option") {
+                continue;
+            }
+
+            let list = match attr.parse_meta()? {
+                Meta::List(l) => l,
+                _ => return Err(Error::new(attr.span(), "expected a list")),
+            };
+
+            for meta in list.nested {
+                match &meta {
+                    NestedMeta::Lit(_) => {
+                        return Err(Error::new(meta.span(), "unexpected literal"));
+                    }
+                    NestedMeta::Meta(m) => match m {
+                        // `required` or `required = true | false` option
+                        Meta::Path(p) if p.is_ident("required") => {
+                            required.set(p.span(), true)?;
+                        }
+                        Meta::NameValue(nv) if nv.path.is_ident("required") => {
+                            required.set(nv.span(), get_lit_boolean(&nv.lit)?)?;
+                        }
+
+                        // `subcommand` | `group` option
+                        Meta::Path(p) => {
+                            if kind.is_some() {
+                                return Err(Error::new(
+                                    p.span(),
+                                    "option type has already been provided",
+                                ));
+                            }
+
+                            kind = SubCommandKind::new(&get_path_as_string(p)?);
+                        }
+                        _ => {
+                            return Err(Error::new(meta.span(), "unknown option or invalid syntax"))
+                        }
+                    },
+                };
+            }
+        }
+
+        let required = required.value().unwrap_or(false);
+
+        let kind = match kind {
+            Some(kind) => kind,
+            None => {
+                return Err(Error::new(
+                    var.span(),
+                    "expected a type for the option (either `subcommand` or `group`)",
+                ));
+            }
+        };
+
+        Ok(Self {
+            ident,
+            kind,
+            required,
+        })
+    }
 }

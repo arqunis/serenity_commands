@@ -1,73 +1,64 @@
-use syn::*;
+use proc_macro2::{Ident, Span};
 use syn::spanned::Spanned;
+use syn::{Attribute, Lit, Meta, Path};
+use syn::{Error, Result};
 
-/// Try to parse a boolean value for an attribute option.
-pub fn parse_boolean(m: &Meta, opt: &str) -> Result<Option<bool>> {
-    match m {
-        Meta::Path(p) => {
-            if !p.is_ident(opt) {
-                return Ok(None);
-            }
+pub struct AttrOption<T> {
+    name: &'static str,
+    value: Option<T>,
+}
 
-            Ok(Some(true))
+impl<T> AttrOption<T> {
+    pub fn new(name: &'static str) -> Self {
+        Self { name, value: None }
+    }
+
+    pub fn set(&mut self, span: Span, value: T) -> Result<()> {
+        if self.value.is_some() {
+            return Err(Error::new(
+                span,
+                format!("`{}` parameter has already been provided", self.name),
+            ));
         }
-        Meta::NameValue(nv) => {
-            if !nv.path.is_ident(opt) {
-                return Ok(None);
-            }
 
-            match &nv.lit {
-                Lit::Bool(b) => Ok(Some(b.value())),
-                _ => return Err(Error::new(nv.lit.span(), "expected a boolean literal")),
-            }
-        }
-        Meta::List(l) => {
-            if l.path.is_ident(opt) {
-                return Err(Error::new(
-                    l.span(),
-                    "invalid syntax for boolean option: unexpected list",
-                ));
-            }
+        self.value = Some(value);
 
-            Ok(None)
-        }
+        Ok(())
+    }
+
+    pub fn value(self) -> Option<T> {
+        self.value
     }
 }
 
-/// Try to parse a string value for an attribute option.
-pub fn parse_string(m: &Meta, opt: &str) -> Result<Option<String>> {
-    match m {
-        Meta::NameValue(nv) => {
-            if !nv.path.is_ident(opt) {
-                return Ok(None);
-            }
-
-            match &nv.lit {
-                Lit::Str(s) => Ok(Some(s.value())),
-                _ => return Err(Error::new(nv.lit.span(), "expected a string literal")),
-            }
-        }
-        Meta::List(l) => {
-            if l.path.is_ident(opt) {
-                return Err(Error::new(
-                    l.span(),
-                    "invalid syntax for string option: unexpected list",
-                ));
-            }
-
-            Ok(None)
-        }
-        Meta::Path(p) if p.is_ident(opt) => {
-            Err(Error::new(m.span(), "expected a string literal value"))
-        }
-        _ => Ok(None),
+pub fn get_lit_string(lit: &Lit) -> Result<String> {
+    match lit {
+        Lit::Str(s) => Ok(s.value()),
+        _ => Err(Error::new(lit.span(), "expected a string literal")),
     }
 }
 
-/// Try to parse an identifier as a string value in an attribute option.
-pub fn parse_ident_as_string(m: &Meta) -> Option<String> {
-    match m {
-        Meta::Path(p) => p.get_ident().map(Ident::to_string),
-        _ => None,
+pub fn get_lit_boolean(lit: &Lit) -> Result<bool> {
+    match lit {
+        Lit::Bool(b) => Ok(b.value()),
+        _ => Err(Error::new(lit.span(), "expected a boolean literal")),
     }
+}
+
+pub fn get_path_as_string(p: &Path) -> Result<String> {
+    p.get_ident()
+        .map(Ident::to_string)
+        .ok_or_else(|| Error::new(p.span(), "expected an identifier"))
+}
+
+pub fn parse_doc(attr: &Attribute) -> Result<String> {
+    let nv = match attr.parse_meta()? {
+        Meta::NameValue(nv) => nv,
+        _ => return Err(Error::new(attr.span(), "invalid documentation string")),
+    };
+
+    Ok(match nv.lit {
+        Lit::Str(s) => s.value().trim().to_string(),
+        _ => return Err(Error::new(nv.span(), "expected string")),
+    })
 }

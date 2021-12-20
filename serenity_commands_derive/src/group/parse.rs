@@ -2,7 +2,7 @@ use proc_macro2::Ident;
 use syn::spanned::Spanned;
 use syn::*;
 
-use crate::common::parse_string;
+use crate::common::{get_lit_string, parse_doc, AttrOption};
 
 pub struct Group {
     pub name: String,
@@ -11,7 +11,8 @@ pub struct Group {
 }
 
 pub fn parse_group(input: &DeriveInput) -> Result<Group> {
-    let mut name = None;
+    let mut name = AttrOption::new("name");
+
     let mut description = None;
 
     for attr in &input.attrs {
@@ -23,50 +24,26 @@ pub fn parse_group(input: &DeriveInput) -> Result<Group> {
                 ));
             }
 
-            let nv = match attr.parse_meta()? {
-                Meta::NameValue(nv) => nv,
-                _ => return Err(Error::new(attr.span(), "invalid documentation string")),
-            };
-
-            description = Some(match nv.lit {
-                Lit::Str(s) => s.value().trim().to_string(),
-                _ => return Err(Error::new(nv.span(), "expected string")),
-            });
-
+            description = Some(parse_doc(attr)?);
             continue;
         }
 
-        if attr.path.is_ident("group") {
-            let list = match attr.parse_meta()? {
-                Meta::List(l) => l,
-                _ => return Err(Error::new(attr.span(), "expected a list")),
-            };
-
-            for meta in list.nested {
-                let m = match meta {
-                    NestedMeta::Meta(m @ Meta::NameValue(_)) => m,
-                    _ => {
-                        return Err(Error::new(
-                            meta.span(),
-                            "expected `<name> = <value>` parameters",
-                        ))
-                    }
-                };
-
-                if let Some(s) = parse_string(&m, "name")? {
-                    if name.is_some() {
-                        return Err(Error::new(
-                            m.span(),
-                            "`name` parameter has already been provided",
-                        ));
-                    }
-
-                    name = Some(s);
-                    continue;
-                }
-            }
-
+        if !attr.path.is_ident("group") {
             continue;
+        }
+
+        let list = match attr.parse_meta()? {
+            Meta::List(l) => l,
+            _ => return Err(Error::new(attr.span(), "expected a list")),
+        };
+
+        for meta in list.nested {
+            match meta {
+                NestedMeta::Meta(Meta::NameValue(nv)) if nv.path.is_ident("name") => {
+                    name.set(nv.span(), get_lit_string(&nv.lit)?)?;
+                }
+                _ => return Err(Error::new(meta.span(), "unknown option or invalid syntax")),
+            };
         }
     }
 
@@ -75,15 +52,22 @@ pub fn parse_group(input: &DeriveInput) -> Result<Group> {
         _ => return Err(Error::new(input.span(), "expected an enum")),
     };
 
-    let name = name.ok_or(Error::new(
-        input.ident.span(),
-        "expected `#[command(...)]` attribute",
-    ))?;
+    let name = match name.value() {
+        Some(name) => name,
+        None => {
+            return Err(Error::new(input.ident.span(), "expected a name"));
+        }
+    };
 
-    let description = description.ok_or(Error::new(
-        input.ident.span(),
-        "expected a description in a documentation string",
-    ))?;
+    let description = match description {
+        Some(desc) => desc,
+        None => {
+            return Err(Error::new(
+                input.ident.span(),
+                "expected a description in a documentation string",
+            ));
+        }
+    };
 
     Ok(Group {
         name,
