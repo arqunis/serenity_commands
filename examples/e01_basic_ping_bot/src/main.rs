@@ -9,7 +9,7 @@ use serenity_commands::serenity;
 #[command(name = "ping")]
 struct Ping {
     /// Amount of pings to send.
-    #[option(integer, required)]
+    #[option(integer)]
     n: i64,
 }
 

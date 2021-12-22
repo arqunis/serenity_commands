@@ -19,143 +19,9 @@ pub fn derive_command(item: TokenStream) -> Result<TokenStream> {
 
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
 
-    let extra = {
-        let mut extra = TokenStream::new();
-
-        match data {
-            CommandData::SubCommands(subcommands) => {
-                let subcommand_idents = subcommands.iter().map(|o| &o.ident).collect::<Vec<_>>();
-
-                let subcommand_vars = subcommands
-                    .iter()
-                    .map(|o| format_ident!("{}", o.ident.to_string().to_lowercase()))
-                    .collect::<Vec<_>>();
-
-                let subcommand_registration_fns =
-                    subcommands.iter().map(|o| o.kind.to_registration_fn());
-
-                let subcommand_parsing_fns = subcommands.iter().map(|o| o.kind.to_parsing_fn());
-
-                extra.extend(quote! {
-                    fn register_command(
-                        cmd: &mut serenity_commands::serenity::builder::CreateApplicationCommand
-                    ) -> &mut serenity_commands::serenity::builder::CreateApplicationCommand {
-                        cmd.name(Self::name())
-                            .description(Self::description())
-                            #(.create_subcommand(#subcommand_idents::#subcommand_registration_fns))*
-                    }
-
-                    fn parse_command(
-                        data: serenity_commands::serenity::model::interactions::application_command::ApplicationCommandInteractionData
-                    ) -> std::result::Result<Self, serenity_commands::error::ParseError> {
-                        if data.name != Self::name() {
-                            return Err(serenity_commands::error::ParseError::UnknownCommand(data.name.clone()));
-                        }
-
-                        #(let #subcommand_vars = #subcommand_idents::name();)*
-
-                        for opt in data.subcommands {
-                            #(if opt.name == #subcommand_vars {
-                                return Ok(Self::#subcommand_idents(#subcommand_idents::#subcommand_parsing_fns(opt)?));
-                            })*
-
-                            return Err(serenity_commands::error::ParseError::UnknownSubCommand(opt.name.clone()));
-                        }
-
-                        unreachable!()
-                    }
-                });
-            },
-            CommandData::Options(options) => {
-                let mut option_fn_names = Vec::new();
-
-                for opt in &options {
-                    option_fn_names.push(generate_option_registration_fn(opt, &mut extra));
-                }
-
-                let option_idents = options.iter().map(|o| &o.ident).collect::<Vec<_>>();
-
-                let option_names = options.iter().map(|o| &o.name).collect::<Vec<_>>();
-
-                let option_kinds = options.iter().map(|o| o.kind);
-
-                let option_data_extractions =
-                    options.iter().map(|o| o.kind.to_data_option_value_extraction());
-
-                extra.extend(quote! {
-                    fn register_command(
-                        cmd: &mut serenity_commands::serenity::builder::CreateApplicationCommand
-                    ) -> &mut serenity_commands::serenity::builder::CreateApplicationCommand {
-                        cmd.name(Self::name())
-                            .description(Self::description())
-                            #(.create_option(Self::#option_fn_names))*
-                    }
-
-                    fn register_subcommand(
-                        opt: &mut serenity_commands::serenity::builder::CreateApplicationCommandOption
-                    ) -> &mut serenity_commands::serenity::builder::CreateApplicationCommandOption {
-                        use serenity_commands::serenity::model::interactions::application_command::ApplicationCommandOptionType;
-
-                        opt.name(Self::name())
-                            .description(Self::description())
-                            .kind(ApplicationCommandOptionType::SubCommand)
-                            #(.create_sub_option(Self::#option_fn_names))*
-                    }
-
-                    fn parse(
-                        options: Vec<serenity_commands::serenity::model::interactions::application_command::ApplicationCommandInteractionDataOption>
-                    ) -> std::result::Result<Self, serenity_commands::error::ParseError> {
-                        use serenity_commands::serenity::model::interactions::application_command::{ApplicationCommandOptionType, ApplicationCommandInteractionDataOptionValue};
-
-                        #(let mut #option_idents = None;)*
-
-                        for opt in options {
-                            match &opt.name[..] {
-                                #(#option_names => {
-                                    if let Some(v) = opt.resolved {
-                                        match v {
-                                            ApplicationCommandInteractionDataOptionValue::#option_data_extractions => #option_idents = Some(v),
-                                            _ => {
-                                                return Err(serenity_commands::error::ParseError::InvalidType(
-                                                    ApplicationCommandOptionType::#option_kinds
-                                                ));
-                                            },
-                                        };
-                                    }
-                                }),*
-                                s => return Err(serenity_commands::error::ParseError::UnknownOption(s.to_string())),
-                            }
-                        }
-
-                        #(let #option_idents = #option_idents.ok_or(serenity_commands::error::ParseError::MissingOption(#option_names))?;)*
-
-                        Ok(Self { #(#option_idents),* })
-                    }
-
-                    fn parse_command(
-                        data: serenity_commands::serenity::model::interactions::application_command::ApplicationCommandInteractionData
-                    ) -> std::result::Result<Self, serenity_commands::error::ParseError> {
-                        if data.name != Self::name() {
-                            return Err(serenity_commands::error::ParseError::UnknownCommand(data.name.clone()));
-                        }
-
-                        Self::parse(data.options)
-                    }
-
-                    fn parse_subcommand(
-                        option: serenity_commands::serenity::model::interactions::application_command::ApplicationCommandInteractionDataOption
-                    ) -> std::result::Result<Self, serenity_commands::error::ParseError> {
-                        if option.name != Self::name() {
-                            return Err(serenity_commands::error::ParseError::UnknownSubCommand(option.name.clone()));
-                        }
-
-                        Self::parse(option.options)
-                    }
-                });
-            },
-        }
-
-        extra
+    let extra = match data {
+        CommandData::SubCommands(subcommands) => generate_subcommand_container_fns(&subcommands),
+        CommandData::Options(options) => generate_command_fns(&options),
     };
 
     let output = quote! {
@@ -178,10 +44,11 @@ pub fn derive_command(item: TokenStream) -> Result<TokenStream> {
 fn generate_option_registration_fn(opt: &CommandOption, tokens: &mut TokenStream) -> Ident {
     let CommandOption {
         ident,
+        ty: _,
+        required,
         name,
         description,
         kind,
-        required,
     } = opt;
 
     let fn_name = format_ident!("register_option_{}", ident);
@@ -213,4 +80,154 @@ fn generate_option_registration_fn(opt: &CommandOption, tokens: &mut TokenStream
     });
 
     fn_name
+}
+
+fn generate_subcommand_container_fns(subcommands: &[SubCommand]) -> TokenStream {
+    let subcommand_idents = subcommands.iter().map(|o| &o.ident).collect::<Vec<_>>();
+
+    let subcommand_vars = subcommands
+        .iter()
+        .map(|o| format_ident!("{}", o.ident.to_string().to_lowercase()))
+        .collect::<Vec<_>>();
+
+    let subcommand_registration_fns = subcommands.iter().map(|o| o.kind.to_registration_fn());
+
+    let subcommand_parsing_fns = subcommands.iter().map(|o| o.kind.to_parsing_fn());
+
+    quote! {
+        fn register_command(
+            cmd: &mut serenity_commands::serenity::builder::CreateApplicationCommand
+        ) -> &mut serenity_commands::serenity::builder::CreateApplicationCommand {
+            cmd.name(Self::name())
+                .description(Self::description())
+                #(.create_subcommand(#subcommand_idents::#subcommand_registration_fns))*
+        }
+
+        fn parse_command(
+            data: serenity_commands::serenity::model::interactions::application_command::ApplicationCommandInteractionData
+        ) -> std::result::Result<Self, serenity_commands::error::ParseError> {
+            if data.name != Self::name() {
+                return Err(serenity_commands::error::ParseError::UnknownCommand(data.name.clone()));
+            }
+
+            #(let #subcommand_vars = #subcommand_idents::name();)*
+
+            for opt in data.subcommands {
+                #(if opt.name == #subcommand_vars {
+                    return Ok(Self::#subcommand_idents(#subcommand_idents::#subcommand_parsing_fns(opt)?));
+                })*
+
+                return Err(serenity_commands::error::ParseError::UnknownSubCommand(opt.name.clone()));
+            }
+
+            unreachable!()
+        }
+    }
+}
+
+fn generate_command_fns(options: &[CommandOption]) -> TokenStream {
+    let mut option_fns = TokenStream::new();
+
+    let mut option_fn_names = Vec::new();
+
+    for opt in options {
+        option_fn_names.push(generate_option_registration_fn(opt, &mut option_fns));
+    }
+
+    let option_idents = options.iter().map(|o| &o.ident).collect::<Vec<_>>();
+    let option_names = options.iter().map(|o| &o.name);
+    let option_kinds = options.iter().map(|o| o.kind);
+
+    let option_data_extractions = options.iter().map(|o| o.kind.to_data_option_value_extraction());
+    let option_requirement_cases = generate_requirement_cases(options);
+
+    quote! {
+        #option_fns
+
+        fn register_command(
+            cmd: &mut serenity_commands::serenity::builder::CreateApplicationCommand
+        ) -> &mut serenity_commands::serenity::builder::CreateApplicationCommand {
+            cmd.name(Self::name())
+                .description(Self::description())
+                #(.create_option(Self::#option_fn_names))*
+        }
+
+        fn register_subcommand(
+            opt: &mut serenity_commands::serenity::builder::CreateApplicationCommandOption
+        ) -> &mut serenity_commands::serenity::builder::CreateApplicationCommandOption {
+            use serenity_commands::serenity::model::interactions::application_command::ApplicationCommandOptionType;
+
+            opt.name(Self::name())
+                .description(Self::description())
+                .kind(ApplicationCommandOptionType::SubCommand)
+                #(.create_sub_option(Self::#option_fn_names))*
+        }
+
+        fn parse(
+            options: Vec<serenity_commands::serenity::model::interactions::application_command::ApplicationCommandInteractionDataOption>
+        ) -> std::result::Result<Self, serenity_commands::error::ParseError> {
+            use serenity_commands::serenity::model::interactions::application_command::{ApplicationCommandOptionType, ApplicationCommandInteractionDataOptionValue};
+
+            #(let mut #option_idents = None;)*
+
+            for opt in options {
+                match &opt.name[..] {
+                    #(#option_names => {
+                        if let Some(v) = opt.resolved {
+                            match v {
+                                ApplicationCommandInteractionDataOptionValue::#option_data_extractions => #option_idents = Some(v),
+                                _ => {
+                                    return Err(serenity_commands::error::ParseError::InvalidType(
+                                        ApplicationCommandOptionType::#option_kinds
+                                    ));
+                                },
+                            };
+                        }
+                    }),*
+                    s => return Err(serenity_commands::error::ParseError::UnknownOption(s.to_string())),
+                }
+            }
+
+            #option_requirement_cases
+
+            Ok(Self { #(#option_idents),* })
+        }
+
+        fn parse_command(
+            data: serenity_commands::serenity::model::interactions::application_command::ApplicationCommandInteractionData
+        ) -> std::result::Result<Self, serenity_commands::error::ParseError> {
+            if data.name != Self::name() {
+                return Err(serenity_commands::error::ParseError::UnknownCommand(data.name.clone()));
+            }
+
+            Self::parse(data.options)
+        }
+
+        fn parse_subcommand(
+            option: serenity_commands::serenity::model::interactions::application_command::ApplicationCommandInteractionDataOption
+        ) -> std::result::Result<Self, serenity_commands::error::ParseError> {
+            if option.name != Self::name() {
+                return Err(serenity_commands::error::ParseError::UnknownSubCommand(option.name.clone()));
+            }
+
+            Self::parse(option.options)
+        }
+    }
+}
+
+fn generate_requirement_cases(options: &[CommandOption]) -> TokenStream {
+    let mut res = TokenStream::new();
+
+    for opt in options {
+        let ident = &opt.ident;
+        let name = &opt.name;
+
+        if opt.required {
+            res.extend(quote! {
+                let #ident = #ident.ok_or(serenity_commands::error::ParseError::MissingOption(#name))?;
+            });
+        }
+    }
+
+    res
 }

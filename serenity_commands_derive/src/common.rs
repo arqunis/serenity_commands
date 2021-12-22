@@ -1,6 +1,6 @@
 use proc_macro2::{Ident, Span};
 use syn::spanned::Spanned;
-use syn::{Attribute, Lit, Meta, Path};
+use syn::{Attribute, Lit, Meta, Path, Type};
 use syn::{Error, Result};
 
 pub struct AttrOption<T> {
@@ -41,6 +41,7 @@ pub fn get_lit_string(lit: &Lit) -> Result<String> {
     }
 }
 
+#[allow(dead_code)]
 pub fn get_lit_boolean(lit: &Lit) -> Result<bool> {
     match lit {
         Lit::Bool(b) => Ok(b.value()),
@@ -64,4 +65,15 @@ pub fn parse_doc(attr: &Attribute) -> Result<String> {
         Lit::Str(s) => s.value().trim().to_string(),
         _ => return Err(Error::new(nv.span(), "expected string")),
     })
+}
+
+pub fn is_option(ty: &Type) -> bool {
+    match ty {
+        // Naive approach, but it's the best we can do. The compiler
+        // only provides us tokens, with no other way of retrieving
+        // type data, since procedural macros are invoked before
+        // type-checking.
+        Type::Path(p) => p.path.segments.last().unwrap().ident == "Option",
+        _ => false,
+    }
 }

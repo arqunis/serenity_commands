@@ -3,7 +3,7 @@ use quote::{quote, ToTokens};
 use syn::spanned::Spanned;
 use syn::*;
 
-use crate::common::{get_lit_boolean, get_lit_string, get_path_as_string, parse_doc, AttrOption};
+use crate::common::{get_lit_string, get_path_as_string, is_option, parse_doc, AttrOption};
 
 pub struct Command {
     pub name: String,
@@ -169,29 +169,30 @@ impl ToTokens for CommandOptionKind {
         });
     }
 }
-
 pub struct CommandOption {
     pub ident: Ident,
+    pub ty: Type,
+    pub required: bool,
     pub name: String,
     pub description: String,
     pub kind: CommandOptionKind,
-    pub required: bool,
 }
 
 impl CommandOption {
-    fn new(f: &Field) -> Result<Self> {
-        let ident = match &f.ident {
+    fn new(field: &Field) -> Result<Self> {
+        let ident = match &field.ident {
             Some(i) => i.clone(),
-            None => return Err(Error::new(f.span(), "expected a name field (i.e. `name: type`)")),
+            None => {
+                return Err(Error::new(field.span(), "expected a name field (i.e. `name: type`)"))
+            },
         };
 
         let mut name = AttrOption::new("name");
-        let mut required = AttrOption::new("required");
 
         let mut description = None;
         let mut kind = None;
 
-        for attr in &f.attrs {
+        for attr in &field.attrs {
             if attr.path.is_ident("doc") {
                 if description.is_some() {
                     return Err(Error::new(
@@ -224,14 +225,6 @@ impl CommandOption {
                             name.set(nv.span(), get_lit_string(&nv.lit)?)?;
                         },
 
-                        // `required` or `required = true | false` option
-                        Meta::Path(p) if p.is_ident("required") => {
-                            required.set(p.span(), true)?;
-                        },
-                        Meta::NameValue(nv) if nv.path.is_ident("required") => {
-                            required.set(nv.span(), get_lit_boolean(&nv.lit)?)?;
-                        },
-
                         // `boolean` | `string` | `integer` | `number` | `mention` | `user` | `channel` | `role` option
                         Meta::Path(p) => {
                             if kind.is_some() {
@@ -252,13 +245,12 @@ impl CommandOption {
         }
 
         let name = name.value().unwrap_or_else(|| ident.to_string());
-        let required = required.value().unwrap_or(false);
 
         let description = match description {
             Some(desc) => desc,
             None => {
                 return Err(Error::new(
-                    f.span(),
+                    field.span(),
                     "expected a documentation string for the description",
                 ))
             },
@@ -268,7 +260,7 @@ impl CommandOption {
             Some(kind) => kind,
             None => {
                 return Err(Error::new(
-                    f.span(),
+                    field.span(),
                     "expected a type for the option (e.g. `string`, `integer`, `number`, ...)",
                 ))
             },
@@ -276,10 +268,11 @@ impl CommandOption {
 
         Ok(Self {
             ident,
+            ty: field.ty.clone(),
+            required: !is_option(&field.ty),
             name,
             description,
             kind,
-            required,
         })
     }
 }
@@ -326,14 +319,11 @@ impl ToTokens for SubCommandKind {
 pub struct SubCommand {
     pub ident: Ident,
     pub kind: SubCommandKind,
-    pub required: bool,
 }
 
 impl SubCommand {
     fn new(var: &Variant) -> Result<Self> {
         let ident = var.ident.clone();
-
-        let mut required = AttrOption::new("required");
 
         let mut kind = None;
 
@@ -353,14 +343,6 @@ impl SubCommand {
                         return Err(Error::new(meta.span(), "unexpected literal"));
                     },
                     NestedMeta::Meta(m) => match m {
-                        // `required` or `required = true | false` option
-                        Meta::Path(p) if p.is_ident("required") => {
-                            required.set(p.span(), true)?;
-                        },
-                        Meta::NameValue(nv) if nv.path.is_ident("required") => {
-                            required.set(nv.span(), get_lit_boolean(&nv.lit)?)?;
-                        },
-
                         // `subcommand` | `group` option
                         Meta::Path(p) => {
                             if kind.is_some() {
@@ -380,8 +362,6 @@ impl SubCommand {
             }
         }
 
-        let required = required.value().unwrap_or(false);
-
         let kind = match kind {
             Some(kind) => kind,
             None => {
@@ -395,7 +375,6 @@ impl SubCommand {
         Ok(Self {
             ident,
             kind,
-            required,
         })
     }
 }
