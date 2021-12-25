@@ -128,10 +128,35 @@ fn parse_enum(data: &DataEnum) -> Result<CommandData> {
     let mut subcommands = Vec::new();
 
     for variant in &data.variants {
+        ensure_tuple_variant(variant)?;
+
         subcommands.push(SubCommand::new(variant)?);
     }
 
     Ok(CommandData::SubCommands(subcommands))
+}
+
+fn ensure_tuple_variant(variant: &Variant) -> Result<()> {
+    match &variant.fields {
+        Fields::Unnamed(n) if n.unnamed.len() != 1 => Err(Error::new(
+            n.span(),
+            "expected a single subcommand as a field of this tuple struct variant",
+        )),
+        Fields::Unnamed(_) => Ok(()),
+        _ => {
+            let mut err = Error::new(
+                variant.span(),
+                "expected a subcommand as a field in a tuple struct variant",
+            );
+
+            err.combine(Error::new(
+                variant.span(),
+                format_args!("note: try changing this to `{0}({0})`", variant.ident),
+            ));
+
+            Err(err)
+        },
+    }
 }
 
 #[derive(Clone, Copy)]
