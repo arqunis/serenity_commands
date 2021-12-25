@@ -1,6 +1,6 @@
 use proc_macro2::{Ident, Span};
 use syn::spanned::Spanned;
-use syn::{Attribute, Lit, Meta, Path, Type};
+use syn::{Attribute, Fields, Lit, Meta, Path, Type, Variant};
 use syn::{Error, Result};
 
 pub struct AttrOption<T> {
@@ -75,5 +75,28 @@ pub fn is_option(ty: &Type) -> bool {
         // type-checking.
         Type::Path(p) => p.path.segments.last().unwrap().ident == "Option",
         _ => false,
+    }
+}
+
+pub fn ensure_tuple_variant(variant: &Variant, entity: &str) -> Result<()> {
+    match &variant.fields {
+        Fields::Unnamed(n) if n.unnamed.len() != 1 => Err(Error::new(
+            n.span(),
+            format_args!("expected a single {} as a field of this tuple struct variant", entity),
+        )),
+        Fields::Unnamed(_) => Ok(()),
+        _ => {
+            let mut err = Error::new(
+                variant.span(),
+                format_args!("expected a {} as a field in a tuple struct variant", entity),
+            );
+
+            err.combine(Error::new(
+                variant.span(),
+                format_args!("note: try changing this to `{0}({0})`", variant.ident),
+            ));
+
+            Err(err)
+        },
     }
 }
