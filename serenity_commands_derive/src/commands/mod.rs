@@ -31,20 +31,19 @@ pub fn derive_commands(item: TokenStream) -> Result<TokenStream> {
                 cmds
             }
 
-            pub(crate) async fn register_commands_globally(ctx: &serenity_commands::serenity::client::Context) {
+            pub(crate) async fn register_commands_globally(
+                ctx: &serenity_commands::serenity::client::Context
+            ) -> serenity_commands::serenity::Result<Vec<serenity_commands::serenity::model::interactions::application_command::ApplicationCommand>> {
                 use serenity_commands::serenity::model::interactions::application_command::ApplicationCommand;
-                ApplicationCommand::set_global_application_commands(ctx, Self::register_commands)
-                    .await
-                    .unwrap();
+
+                ApplicationCommand::set_global_application_commands(ctx, Self::register_commands).await
             }
 
             pub(crate) async fn register_commands_in_guild(
                 ctx: &serenity_commands::serenity::client::Context,
                 guild_id: serenity_commands::serenity::model::id::GuildId,
-            ) {
-                guild_id.set_application_commands(ctx, Self::register_commands)
-                    .await
-                    .unwrap();
+            ) -> serenity_commands::serenity::Result<Vec<serenity_commands::serenity::model::interactions::application_command::ApplicationCommand>> {
+                guild_id.set_application_commands(ctx, Self::register_commands).await
             }
 
             pub(crate) fn parse(
