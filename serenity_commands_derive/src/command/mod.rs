@@ -26,11 +26,11 @@ pub fn derive_command(item: TokenStream) -> Result<TokenStream> {
 
     let output = quote! {
         impl #impl_generics #name #ty_generics #where_clause {
-            fn name() -> &'static str {
+            pub(crate) fn name() -> &'static str {
                 #cmd
             }
 
-            fn description() -> &'static str {
+            pub(crate) fn description() -> &'static str {
                 #description
             }
 
@@ -95,7 +95,7 @@ fn generate_subcommand_container_fns(subcommands: &[SubCommand]) -> TokenStream 
     let subcommand_parsing_fns = subcommands.iter().map(|o| o.kind.to_parsing_fn());
 
     quote! {
-        fn register_command(
+        pub(crate) fn register_command(
             cmd: &mut serenity_commands::serenity::builder::CreateApplicationCommand
         ) -> &mut serenity_commands::serenity::builder::CreateApplicationCommand {
             cmd.name(Self::name())
@@ -103,7 +103,7 @@ fn generate_subcommand_container_fns(subcommands: &[SubCommand]) -> TokenStream 
                 #(.create_subcommand(#subcommand_idents::#subcommand_registration_fns))*
         }
 
-        fn parse_command(
+        pub(crate) fn parse_command(
             data: serenity_commands::serenity::model::interactions::application_command::ApplicationCommandInteractionData
         ) -> std::result::Result<Self, serenity_commands::error::ParseError> {
             if data.name != Self::name() {
@@ -144,7 +144,7 @@ fn generate_command_fns(options: &[CommandOption]) -> TokenStream {
     quote! {
         #option_fns
 
-        fn register_command(
+        pub(crate) fn register_command(
             cmd: &mut serenity_commands::serenity::builder::CreateApplicationCommand
         ) -> &mut serenity_commands::serenity::builder::CreateApplicationCommand {
             cmd.name(Self::name())
@@ -152,7 +152,7 @@ fn generate_command_fns(options: &[CommandOption]) -> TokenStream {
                 #(.create_option(Self::#option_fn_names))*
         }
 
-        fn register_subcommand(
+        pub(crate) fn register_subcommand(
             opt: &mut serenity_commands::serenity::builder::CreateApplicationCommandOption
         ) -> &mut serenity_commands::serenity::builder::CreateApplicationCommandOption {
             use serenity_commands::serenity::model::interactions::application_command::ApplicationCommandOptionType;
@@ -163,7 +163,7 @@ fn generate_command_fns(options: &[CommandOption]) -> TokenStream {
                 #(.create_sub_option(Self::#option_fn_names))*
         }
 
-        fn parse(
+        pub(crate) fn parse(
             options: Vec<serenity_commands::serenity::model::interactions::application_command::ApplicationCommandInteractionDataOption>
         ) -> std::result::Result<Self, serenity_commands::error::ParseError> {
             use serenity_commands::serenity::model::interactions::application_command::{ApplicationCommandOptionType, ApplicationCommandInteractionDataOptionValue};
@@ -193,7 +193,7 @@ fn generate_command_fns(options: &[CommandOption]) -> TokenStream {
             Ok(Self { #(#option_idents),* })
         }
 
-        fn parse_command(
+        pub(crate) fn parse_command(
             data: serenity_commands::serenity::model::interactions::application_command::ApplicationCommandInteractionData
         ) -> std::result::Result<Self, serenity_commands::error::ParseError> {
             if data.name != Self::name() {
@@ -203,7 +203,7 @@ fn generate_command_fns(options: &[CommandOption]) -> TokenStream {
             Self::parse(data.options)
         }
 
-        fn parse_subcommand(
+        pub(crate) fn parse_subcommand(
             option: serenity_commands::serenity::model::interactions::application_command::ApplicationCommandInteractionDataOption
         ) -> std::result::Result<Self, serenity_commands::error::ParseError> {
             if option.name != Self::name() {

@@ -28,7 +28,7 @@ pub fn derive_group(item: TokenStream) -> Result<TokenStream> {
             .collect::<Vec<_>>();
 
         extra.extend(quote! {
-            fn register_subcommand_group(
+            pub(crate) fn register_subcommand_group(
                 opt: &mut serenity_commands::serenity::builder::CreateApplicationCommandOption
             ) -> &mut serenity_commands::serenity::builder::CreateApplicationCommandOption {
                 use serenity_commands::serenity::model::interactions::application_command::ApplicationCommandOptionType;
@@ -39,7 +39,7 @@ pub fn derive_group(item: TokenStream) -> Result<TokenStream> {
                     #(.create_sub_option(#subcommands::register_subcommand))*
             }
 
-            fn parse_subcommand_group(
+            pub(crate) fn parse_subcommand_group(
                 option: serenity_commands::serenity::model::interactions::application_command::ApplicationCommandInteractionDataOption
             ) -> std::result::Result<Self, serenity_commands::error::ParseError> {
                 if option.name != Self::name() {
@@ -65,11 +65,11 @@ pub fn derive_group(item: TokenStream) -> Result<TokenStream> {
 
     let output = quote! {
         impl #impl_generics #name #ty_generics #where_clause {
-            fn name() -> &'static str {
+            pub(crate) fn name() -> &'static str {
                 #group
             }
 
-            fn description() -> &'static str {
+            pub(crate) fn description() -> &'static str {
                 #description
             }
 

@@ -31,14 +31,14 @@ pub fn derive_commands(item: TokenStream) -> Result<TokenStream> {
                 cmds
             }
 
-            async fn register_commands_globally(ctx: &serenity_commands::serenity::client::Context) {
+            pub(crate) async fn register_commands_globally(ctx: &serenity_commands::serenity::client::Context) {
                 use serenity_commands::serenity::model::interactions::application_command::ApplicationCommand;
                 ApplicationCommand::set_global_application_commands(ctx, Self::register_commands)
                     .await
                     .unwrap();
             }
 
-            async fn register_commands_in_guild(
+            pub(crate) async fn register_commands_in_guild(
                 ctx: &serenity_commands::serenity::client::Context,
                 guild_id: serenity_commands::serenity::model::id::GuildId,
             ) {
@@ -47,7 +47,7 @@ pub fn derive_commands(item: TokenStream) -> Result<TokenStream> {
                     .unwrap();
             }
 
-            fn parse(
+            pub(crate) fn parse(
                 interaction: serenity_commands::serenity::model::interactions::application_command::ApplicationCommandInteraction
             ) -> std::result::Result<Self, serenity_commands::error::ParseError> {
                 #(let #command_vars = #commands::name();)*
