@@ -94,6 +94,13 @@ fn parse_struct(data: &DataStruct) -> Result<CommandData> {
     match &data.fields {
         Fields::Unit => Ok(CommandData::Options(Vec::new())),
         Fields::Named(n) => {
+            if n.named.len() > 25 {
+                return Err(Error::new(
+                    data.fields.span(),
+                    "a command cannot have more than 25 options",
+                ));
+            }
+
             let mut options = Vec::new();
             for field in &n.named {
                 options.push(CommandOption::new(field)?);
@@ -111,6 +118,13 @@ fn parse_struct(data: &DataStruct) -> Result<CommandData> {
 }
 
 fn parse_enum(data: &DataEnum) -> Result<CommandData> {
+    if data.variants.len() > 25 {
+        return Err(Error::new(
+            data.variants.span(),
+            "a command cannot have more than 25 of the combined sum of subcommand groups and subcommands",
+        ));
+    }
+
     let mut subcommands = Vec::new();
 
     for variant in &data.variants {

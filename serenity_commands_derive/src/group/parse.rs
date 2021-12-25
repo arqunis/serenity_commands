@@ -48,7 +48,7 @@ pub fn parse_group(input: &DeriveInput) -> Result<Group> {
     }
 
     let subcommands = match &input.data {
-        Data::Enum(e) => parse_enum(e),
+        Data::Enum(e) => parse_enum(e)?,
         _ => return Err(Error::new(input.span(), "expected an enum")),
     };
 
@@ -76,6 +76,13 @@ pub fn parse_group(input: &DeriveInput) -> Result<Group> {
     })
 }
 
-fn parse_enum(data: &DataEnum) -> Vec<Ident> {
-    data.variants.iter().map(|v| v.ident.clone()).collect()
+fn parse_enum(data: &DataEnum) -> Result<Vec<Ident>> {
+    if data.variants.len() > 25 {
+        return Err(Error::new(
+            data.variants.span(),
+            "a subcommand group cannot have more than 25 subcommands",
+        ));
+    }
+
+    Ok(data.variants.iter().map(|v| v.ident.clone()).collect())
 }
