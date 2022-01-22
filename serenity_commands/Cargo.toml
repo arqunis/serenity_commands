@@ -9,7 +9,6 @@ edition = "2021"
 serenity_commands_derive = { path = "../serenity_commands_derive" }
 
 [dependencies.serenity]
-git = "https://github.com/serenity-rs/serenity"
-branch = "current"
+version = "0.10.10"
 features = ["client", "model", "gateway", "cache", "rustls_backend", "unstable_discord_api"]
 default-features = false
